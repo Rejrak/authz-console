@@ -7,7 +7,7 @@ interface KeplrProvider {
   experimentalSuggestChain(info: ReturnType<typeof alphaChainInfo>): Promise<void>
   enable(chainId: string): Promise<void>
   disable?(chainId: string): Promise<void>
-  getOfflineSigner(chainId: string): OfflineSigner
+  getOfflineSigner(chainId: string, options?: { preferNoSetFee?: boolean; preferNoSetMemo?: boolean; disableBalanceCheck?: boolean }): OfflineSigner
   getKey(chainId: string): Promise<{ bech32Address: string; pubKey: Uint8Array; isNanoLedger: boolean }>
 }
 
@@ -53,7 +53,7 @@ export async function connectKeplr(chainId: string, prefix: string): Promise<Wal
   await wallet.enable(chainId)
   const key = await wallet.getKey(chainId)
   if (key.isNanoLedger) throw new Error('This Keplr account does not expose direct signing')
-  const signer = wallet.getOfflineSigner(chainId)
+  const signer = wallet.getOfflineSigner(chainId, { preferNoSetFee: true, preferNoSetMemo: true, disableBalanceCheck: true })
   if (!isOfflineDirectSigner(signer)) throw new Error('Wallet does not support SIGN_MODE_DIRECT')
   const accounts = await signer.getAccounts()
   const account = accounts.find((item) => item.address === key.bech32Address)

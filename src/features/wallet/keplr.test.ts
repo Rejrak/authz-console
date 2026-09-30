@@ -13,7 +13,8 @@ it('obtains account, public key, and an arbitrary direct SignDoc signer', async 
   const signer = { getAccounts: async () => [{ address, algo: 'secp256k1' as const, pubkey }], signDirect: vi.fn() }
   const suggest = vi.fn()
   const enable = vi.fn()
-  window.keplr = { experimentalSuggestChain: suggest, enable, getKey: async () => ({ bech32Address: address, pubKey: pubkey, isNanoLedger: false }), getOfflineSigner: () => signer }
+  const getOfflineSigner = vi.fn(() => signer)
+  window.keplr = { experimentalSuggestChain: suggest, enable, getKey: async () => ({ bech32Address: address, pubKey: pubkey, isNanoLedger: false }), getOfflineSigner }
   const session = await connectKeplr('alpha-1', 'cosmos')
   const direct: OfflineDirectSigner = session.signer
   const customDoc: Parameters<typeof direct.signDirect>[1] = { bodyBytes: new Uint8Array([8, 255]), authInfoBytes: new Uint8Array([1]), chainId: 'alpha-1', accountNumber: 9007199254740993n }
@@ -21,6 +22,7 @@ it('obtains account, public key, and an arbitrary direct SignDoc signer', async 
   expect(customDoc.bodyBytes).toEqual(new Uint8Array([8, 255]))
   expect(session.publicKey).toEqual(pubkey)
   expect(session.address).toBe(address)
+  expect(getOfflineSigner).toHaveBeenCalledExactlyOnceWith('alpha-1', { preferNoSetFee: true, preferNoSetMemo: true, disableBalanceCheck: true })
   expect(suggest.mock.invocationCallOrder[0]).toBeLessThan(enable.mock.invocationCallOrder[0])
   expect(suggest.mock.calls[0][0]).toMatchObject({ chainId: 'alpha-1', bech32Config: { bech32PrefixAccAddr: 'cosmos' }, stakeCurrency: { coinMinimalDenom: 'stake' } })
   expect(suggest.mock.calls[0][0].currencies).toEqual(expect.arrayContaining([expect.objectContaining({ coinMinimalDenom: 'token' })]))
