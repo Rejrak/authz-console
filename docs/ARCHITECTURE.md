@@ -4,7 +4,7 @@ Status: proposed frontend and API boundary. No console API exists yet. V2 chain 
 
 ## Scope and authority
 
-React, TypeScript, and Vite render one V2 direct bank send flow and its result. The browser proposes transfer facts and signs with the user's Cosmos wallet. A trusted server runs the existing middleware `CertificateIssuerV2.Issue`: it reads Keycloak attributes, evaluates policy, reads Alpha account state, selects policy and issuer set from server configuration, and signs with issuer keys. Never send issuer keys or Keycloak admin credentials to the browser. Never let the browser choose `policy_id`, `policy_version`, `policy_hash`, `issuer_set_id`, issuer signatures, account number, or sequence as authority. Alpha consensus code is unchanged.
+React, TypeScript, and Vite render one V2 direct bank send flow and its result. The browser proposes transfer facts and signs with the user's Cosmos wallet. A trusted server runs the existing middleware `CertificateIssuerV2.Issue`: it reads Keycloak attributes, evaluates policy, reads Alpha account state, selects policy and issuer set from server configuration, and signs with issuer keys. Issuer private keys and private material, plus Keycloak admin credentials, never reach the browser. Issuer signatures are part of the serialized `AuthorizationCertificateV2` returned to the browser; do not expose them separately as admin or observability data. Never let the browser choose `policy_id`, `policy_version`, `policy_hash`, `issuer_set_id`, issuer signatures, account number, or sequence as authority. Alpha consensus code is unchanged.
 
 ```text
 Browser form + Cosmos wallet
@@ -51,7 +51,7 @@ Use protocol protobuf definitions as the source of truth for certificate decodin
 
 ## Observability
 
-On successful included V2 transactions, read Alpha `authz_v2_decision`: `subject`, `msg_type`, `policy_id`, `policy_version`, `issuer_set_id`, `certificate_digest`, `quorum_weight`, `signature_count`, `outcome=ALLOW`, `reason_code=AUTHZ_OK`, `height`. Correlate local digest with event digest and transaction hash. A failed Ante execution has no committed success event; show tx `code`, `codespace`, and stable `AUTHZ_V2_*` reason when available, never invent a DENY event. Issuer logs `v2_policy_evaluated`, `v2_certificate_built`, and `v2_certificate_signed` stay server-side. Existing CLI transaction logs `v2_tx_*` are not a console API. The browser should not receive raw logs, attributes, signatures, or keys.
+On successful included V2 transactions, read Alpha `authz_v2_decision`: `subject`, `msg_type`, `policy_id`, `policy_version`, `issuer_set_id`, `certificate_digest`, `quorum_weight`, `signature_count`, `outcome=ALLOW`, `reason_code=AUTHZ_OK`, `height`. Correlate local digest with event digest and transaction hash. A failed Ante execution has no committed success event; show tx `code`, `codespace`, and stable `AUTHZ_V2_*` reason when available, never invent a DENY event. Issuer logs `v2_policy_evaluated`, `v2_certificate_built`, and `v2_certificate_signed` stay server-side. Existing CLI transaction logs `v2_tx_*` are not a console API. The browser should not receive raw logs, attributes, issuer signatures as separate observability data, or private keys.
 
 ## Sources inspected
 
