@@ -11,11 +11,11 @@ it('maps standard RPC and LCD responses without Number conversion', async () => 
   ]
   const fetchMock = vi.fn().mockImplementation(async () => ({ ok: true, json: async () => responses.shift() }))
   vi.stubGlobal('fetch', fetchMock)
-  expect(await fetchPreflight('alpha1test')).toEqual({ chainId: 'alpha-1', height: '9007199254740993', accountNumber: '18446744073709551615', sequence: '3', balance: '9007199254740993' })
+  expect(await fetchPreflight('cosmos1test')).toEqual({ chainId: 'alpha-1', height: '9007199254740993', accountNumber: '18446744073709551615', sequence: '3', balance: '9007199254740993' })
   expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-    'http://127.0.0.1:26657/status',
-    'http://127.0.0.1:1317/cosmos/auth/v1beta1/accounts/alpha1test',
-    'http://127.0.0.1:1317/cosmos/bank/v1beta1/balances/alpha1test/by_denom?denom=stake',
+    '/alpha-rpc/status',
+    '/alpha-rest/cosmos/auth/v1beta1/accounts/cosmos1test',
+    '/alpha-rest/cosmos/bank/v1beta1/balances/cosmos1test/by_denom?denom=token',
   ])
 })
 
@@ -27,5 +27,5 @@ it('rejects wrong chain and unsafe uint64 strings', () => {
 
 it('keeps account query errors visible', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }))
-  await expect(fetchPreflight('alpha1test')).rejects.toThrow('HTTP 503')
+  await expect(fetchPreflight('cosmos1test')).rejects.toThrow('HTTP 503')
 })

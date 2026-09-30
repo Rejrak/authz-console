@@ -1,4 +1,5 @@
 import { uint64String } from '../chain/preflight'
+import { isAccountAddress } from '../../lib/alpha/address'
 
 export interface SendDraft {
   receiver: string
@@ -13,12 +14,12 @@ export interface SendDraft {
 
 export function validateDraft(draft: SendDraft, prefix: string): Partial<Record<keyof SendDraft, string>> {
   const errors: Partial<Record<keyof SendDraft, string>> = {}
-  if (!new RegExp(`^${prefix}1[023456789acdefghjklmnpqrstuvwxyz]{38,}$`).test(draft.receiver)) errors.receiver = `Enter a ${prefix} bech32 address.`
+  if (!isAccountAddress(draft.receiver, prefix)) errors.receiver = `Enter a valid ${prefix} bech32 address.`
   if (!draft.denom.trim()) errors.denom = 'Denom is required.'
   if (!draft.feeDenom.trim()) errors.feeDenom = 'Fee denom is required.'
   for (const field of ['amount', 'feeAmount'] as const) {
     const value = draft[field]
-    if (value.length > 78 || !/^(0|[1-9][0-9]*)$/.test(value) || BigInt(value) > (1n << 255n) - 1n || (field === 'amount' && value === '0')) errors[field] = `${field === 'amount' ? 'Amount' : 'Fee amount'} must be ${field === 'amount' ? 'a positive' : 'a nonnegative'} integer.`
+    if (value.length > 78 || !/^(0|[1-9][0-9]*)$/.test(value) || BigInt(value) > (1n << 256n) - 1n || (field === 'amount' && value === '0')) errors[field] = `${field === 'amount' ? 'Amount' : 'Fee amount'} must be ${field === 'amount' ? 'a positive' : 'a nonnegative'} integer.`
   }
   for (const field of ['gasLimit', 'timeoutHeight'] as const) {
     try {

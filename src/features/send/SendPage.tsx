@@ -1,14 +1,26 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { config } from '../../app/config'
+import { AuthArea } from '../auth/AuthArea'
+import { accessToken, useKeycloak } from '../auth/keycloak'
+import { PreflightArea } from '../chain/PreflightArea'
+import { usePreflight } from '../chain/usePreflight'
+import { fetchPreflight } from '../chain/preflight'
 import type { WalletSession } from '../wallet/keplr'
 import { WalletArea } from '../wallet/WalletArea'
-import { PreflightArea } from '../chain/PreflightArea'
+import { verifyCertificate } from '../../lib/alpha/certificate'
+import type { VerifiedCertificate } from '../../lib/alpha/certificate'
+import { broadcastAndConfirm } from '../../lib/alpha/broadcast'
+import type { Inclusion } from '../../lib/alpha/broadcast'
+import { buildSignDoc, signTxRaw } from '../../lib/alpha/transaction'
+import { requestCertificate } from './certificateApi'
+import { canRequestCertificate, certificateCurrent } from './gate'
 import { validateDraft } from './validation'
 import type { SendDraft } from './validation'
 
 const fields: { key: keyof SendDraft; label: string; hint?: string }[] = [
   { key: 'receiver', label: 'Receiver address' },
-  { key: 'denom', label: 'Denom' },
+  { key: 'denom', label: 'Transfer denom' },
   { key: 'amount', label: 'Amount (base units)' },
   { key: 'feeAmount', label: 'Fee amount (base units)' },
   { key: 'feeDenom', label: 'Fee denom' },
@@ -19,19 +31,136 @@ const fields: { key: keyof SendDraft; label: string; hint?: string }[] = [
 
 export function SendPage() {
   const [session, setSession] = useState<WalletSession | null>(null)
-  const [draft, setDraft] = useState<SendDraft>({ receiver: '', denom: config.denom, amount: '', feeAmount: '0', feeDenom: config.denom, gasLimit: '', memo: '', timeoutHeight: '0' })
+  const sessionRef = useRef<WalletSession | null>(null)
+  const [draft, setDraft] = useState<SendDraft>({ receiver: '', denom: config.transferDenom, amount: '', feeAmount: '0', feeDenom: config.feeDenom, gasLimit: '', memo: '', timeoutHeight: '0' })
+  const draftRef = useRef(draft)
   const [touched, setTouched] = useState<Partial<Record<keyof SendDraft, boolean>>>({})
+  const [certificate, setCertificate] = useState<{ value: VerifiedCertificate; address: string } | null>(null)
+  const [stage, setStage] = useState<'draft' | 'requesting' | 'issued' | 'awaiting-signature' | 'signed' | 'broadcasting' | 'included' | 'failed'>('draft')
+  const [error, setError] = useState('')
+  const [inclusion, setInclusion] = useState<Inclusion | null>(null)
+  const broadcastAttempted = useRef(false)
+  const [broadcasted, setBroadcasted] = useState(false)
+  const auth = useKeycloak()
+  const preflight = usePreflight(session?.address ?? null)
   const errors = validateDraft(draft, config.prefix)
+  const current = certificate && certificateCurrent(certificate.value.accountNumber, certificate.value.sequence, certificate.value.validFromHeight, certificate.value.validUntilHeight, preflight.isSuccess ? preflight.data : undefined, session?.address, certificate.address)
+  const canRequest = canRequestCertificate(auth.status === 'authenticated', session, preflight.isSuccess ? preflight.data : undefined, draft)
+
+  const issue = useMutation({
+    mutationFn: async ({ snapshot, wallet }: { snapshot: SendDraft; wallet: WalletSession }) => {
+      const token = await accessToken()
+      const response = await requestCertificate(snapshot, wallet.address, token)
+      const latest = await fetchPreflight(wallet.address)
+      return verifyCertificate(response, snapshot, wallet.address, latest)
+    },
+  })
+
+  function changeWallet(next: WalletSession | null) {
+    sessionRef.current = next
+    setSession(next)
+    setCertificate(null)
+    setInclusion(null)
+    setStage('draft')
+    setError('')
+    broadcastAttempted.current = false
+    setBroadcasted(false)
+  }
+
+  function changeField(key: keyof SendDraft, value: string) {
+    const next = { ...draftRef.current, [key]: value }
+    draftRef.current = next
+    setDraft(next)
+    if (certificate) { setCertificate(null); setStage('draft'); setInclusion(null) }
+  }
+
+  async function request() {
+    if (!canRequest || !session) return
+    const wallet = session
+    const snapshot = { ...draft }
+    setStage('requesting')
+    setError('')
+    try {
+      const value = await issue.mutateAsync({ snapshot, wallet })
+      if (sessionRef.current !== wallet || JSON.stringify(draftRef.current) !== JSON.stringify(snapshot)) throw new Error('Wallet or draft changed during certificate issuance')
+      setCertificate({ value, address: wallet.address })
+      setStage('issued')
+    } catch (cause) {
+      setCertificate(null)
+      setStage('failed')
+      setError(cause instanceof Error ? cause.message : 'Certificate request failed')
+    }
+  }
+
+  async function fresh(value: VerifiedCertificate, wallet: WalletSession) {
+    if (sessionRef.current !== wallet) throw new Error('Wallet changed; request a new certificate')
+    const latest = await fetchPreflight(wallet.address)
+    if (!certificateCurrent(value.accountNumber, value.sequence, value.validFromHeight, value.validUntilHeight, latest, wallet.address, wallet.address)) throw new Error('Account sequence, chain, or certificate height changed; request a new certificate')
+    const accounts = await wallet.signer.getAccounts()
+    if (!accounts.some((account) => account.address === wallet.address)) throw new Error('Wallet account changed; request a new certificate')
+  }
+
+  async function signAndSubmit() {
+    if (!certificate || !current || !session || auth.status !== 'authenticated' || broadcastAttempted.current) return
+    const { value } = certificate
+    const wallet = session
+    setError('')
+    try {
+      await fresh(value, wallet)
+      const signDoc = buildSignDoc(draft, wallet, value)
+      setStage('awaiting-signature')
+      let raw: Uint8Array
+      try { raw = await signTxRaw(wallet, signDoc) }
+      catch (cause) {
+        if (cause instanceof Error && cause.message.startsWith('Unsupported wallet signing path')) throw cause
+        throw new Error('Wallet signing was rejected or failed. Nothing was broadcast.', { cause })
+      }
+      setStage('signed')
+      await fresh(value, wallet)
+      broadcastAttempted.current = true
+      setBroadcasted(true)
+      setStage('broadcasting')
+      const result = await broadcastAndConfirm(raw, value.digest)
+      setInclusion(result)
+      setStage('included')
+    } catch (cause) {
+      setStage('failed')
+      setError(cause instanceof Error ? cause.message : 'Transaction failed')
+      if (cause instanceof Error && /changed|height/.test(cause.message)) setCertificate(null)
+    }
+  }
+
+  function discard() {
+    setCertificate(null)
+    setInclusion(null)
+    setStage('draft')
+    setError('')
+    broadcastAttempted.current = false
+    setBroadcasted(false)
+    preflight.refetch()
+  }
+
+  const lifecycle = auth.status === 'checking' ? 'Authenticating' : stage === 'draft' && session && preflight.isSuccess ? 'Wallet ready' : ({ draft: 'Draft', requesting: 'Requesting certificate', issued: 'Certificate issued', 'awaiting-signature': 'Awaiting wallet signature', signed: 'Signed', broadcasting: 'Broadcasting', included: 'Included', failed: 'Failed' } as const)[stage]
+  const locked = !!certificate || stage === 'requesting' || stage === 'awaiting-signature' || stage === 'broadcasting' || stage === 'included'
 
   return <div className="page">
-    <header className="page-header"><p className="eyebrow">Authorization / V2 bank send</p><h1>Prepare transfer</h1><p className="muted">Review every bound field before requesting a certificate. No transaction is sent from this page.</p></header>
-    <div className="two-column"><WalletArea session={session} onChange={setSession}/><PreflightArea address={session?.address ?? null}/></div>
-    <section className="panel send-panel" aria-labelledby="send-heading"><div className="section-heading"><div><p className="eyebrow">03 / Intent</p><h2 id="send-heading">Transaction fields</h2></div><span className="status">Draft only</span></div>
-      <p className="muted">Receiver, amount, fee, gas, memo, timeout, account number, and sequence will be bound by the issuer certificate.</p>
+    <header className="page-header"><p className="eyebrow">Authorization / V2 bank send</p><h1>Prepare transfer</h1><p className="muted">Certificate, wallet signature, and chain inclusion are separate steps.</p><p className={`status ${stage === 'failed' ? 'bad' : stage === 'included' ? 'good' : ''}`} aria-live="polite">{lifecycle}</p></header>
+    <div className="two-column"><WalletArea session={session} onChange={changeWallet}/><AuthArea auth={auth}/></div>
+    <div className="preflight-row"><PreflightArea address={session?.address ?? null} query={preflight}/></div>
+    <section className="panel send-panel" aria-labelledby="send-heading"><div className="section-heading"><div><p className="eyebrow">04 / Intent</p><h2 id="send-heading">Transaction fields</h2></div><span className="status">{locked ? 'Bound' : 'Draft'}</span></div>
+      <p className="muted">Receiver, amount, fee, gas, memo, timeout, account number, and sequence are bound by the certificate.</p>
       <form noValidate onSubmit={(event) => event.preventDefault()}><div className="form-grid">{fields.map(({ key, label, hint }) => <div className={`field ${key === 'receiver' || key === 'memo' ? 'wide' : ''}`} key={key}>
-        <label htmlFor={key}>{label}</label><input id={key} value={draft[key]} onChange={(event) => setDraft({ ...draft, [key]: event.target.value })} onBlur={() => setTouched({ ...touched, [key]: true })} aria-invalid={!!(touched[key] && errors[key])} aria-describedby={touched[key] && errors[key] ? `${key}-error` : hint ? `${key}-hint` : undefined} inputMode={['amount', 'feeAmount', 'gasLimit', 'timeoutHeight'].includes(key) ? 'numeric' : undefined} autoComplete="off" />
+        <label htmlFor={key}>{label}</label><input id={key} value={draft[key]} disabled={locked} onChange={(event) => changeField(key, event.target.value)} onBlur={() => setTouched({ ...touched, [key]: true })} aria-invalid={!!(touched[key] && errors[key])} aria-describedby={touched[key] && errors[key] ? `${key}-error` : hint ? `${key}-hint` : undefined} inputMode={['amount', 'feeAmount', 'gasLimit', 'timeoutHeight'].includes(key) ? 'numeric' : undefined} autoComplete="off" />
         {hint && <small id={`${key}-hint`} className="muted">{hint}</small>}{touched[key] && errors[key] && <small id={`${key}-error`} className="error">{errors[key]}</small>}
-      </div>)}</div><div className="form-footer"><button type="submit" disabled>Request certificate</button><p className="muted">Certificate API integration comes in UI-2. Form cannot submit yet.</p></div></form>
+      </div>)}</div><div className="form-footer"><button type="button" onClick={request} disabled={!canRequest || !!certificate || issue.isPending || stage === 'broadcasting' || stage === 'included'}>Request certificate</button>{!canRequest && <p className="muted">Connect Keplr, sign in, complete preflight, and enter valid fields.</p>}</div></form>
     </section>
+    {certificate && <section className="panel certificate-panel" aria-labelledby="certificate-heading"><div className="section-heading"><div><p className="eyebrow">05 / Certificate</p><h2 id="certificate-heading">Issued, ready to review</h2></div><span className={`status ${current ? 'good' : ''}`}>{current ? 'Current' : 'Stale'}</span></div>
+      <p className="muted">Issuer decision is not transaction approval. Keplr must sign the exact V2 body before Alpha can include it.</p>
+      <dl className="facts certificate-facts"><div><dt>Protocol</dt><dd>{certificate.value.protocolVersion}</dd></div><div><dt>Digest</dt><dd className="mono break">{certificate.value.digest}</dd></div><div><dt>Policy</dt><dd>{certificate.value.policyId} · version {certificate.value.policyVersion}</dd></div><div><dt>Issuer set</dt><dd>{certificate.value.issuerSetId}</dd></div><div><dt>Valid heights</dt><dd>{certificate.value.validFromHeight}–{certificate.value.validUntilHeight}</dd></div><div><dt>Account / sequence</dt><dd>{certificate.value.accountNumber} / {certificate.value.sequence}</dd></div><div><dt>Chain</dt><dd>{certificate.value.chainId}</dd></div></dl>
+      {!current && <p className="error" role="alert">Account, chain, or height changed. Discard this certificate and request another.</p>}
+      <div className="actions"><button type="button" onClick={signAndSubmit} disabled={!current || auth.status !== 'authenticated' || broadcasted || ['awaiting-signature', 'signed', 'broadcasting', 'included'].includes(stage)}>Sign and submit V2 transaction</button><button type="button" className="secondary" onClick={discard} disabled={stage === 'awaiting-signature' || stage === 'broadcasting'}>Discard certificate</button></div>
+    </section>}
+    {error && <p className="error result-message" role="alert">{error}</p>}
+    {inclusion && <section className="panel result-panel" aria-labelledby="result-heading"><p className="eyebrow">06 / Chain result</p><h2 id="result-heading">Included at height {inclusion.height} · code {inclusion.code}</h2><p className="mono break">{inclusion.txHash}</p><dl className="facts certificate-facts">{['subject', 'msg_type', 'policy_id', 'policy_version', 'issuer_set_id', 'certificate_digest', 'quorum_weight', 'signature_count', 'outcome', 'reason_code', 'height'].map((key) => <div key={key}><dt>{key}</dt><dd className="mono break">{inclusion.decision[key] ?? 'Missing'}</dd></div>)}</dl></section>}
   </div>
 }

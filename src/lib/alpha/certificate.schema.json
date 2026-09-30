@@ -1,0 +1,141 @@
+{
+  "nested": {
+    "alpha": {
+      "nested": {
+        "authzattrs": {
+          "nested": {
+            "v2": {
+              "options": {
+                "go_package": "alpha/x/authzattrs/v2"
+              },
+              "nested": {
+                "FeeCoinV2": {
+                  "fields": {
+                    "denom": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "amount": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "AuthorizationIntentV2": {
+                  "fields": {
+                    "chainId": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "subject": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "receiver": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "denom": {
+                      "type": "string",
+                      "id": 4
+                    },
+                    "amount": {
+                      "type": "string",
+                      "id": 5
+                    },
+                    "accountNumber": {
+                      "type": "uint64",
+                      "id": 6
+                    },
+                    "sequence": {
+                      "type": "uint64",
+                      "id": 7
+                    },
+                    "timeoutHeight": {
+                      "type": "uint64",
+                      "id": 8
+                    },
+                    "memo": {
+                      "type": "string",
+                      "id": 9
+                    },
+                    "feeAmount": {
+                      "rule": "repeated",
+                      "type": "FeeCoinV2",
+                      "id": 10
+                    },
+                    "gasLimit": {
+                      "type": "uint64",
+                      "id": 11
+                    }
+                  }
+                },
+                "AuthorizationCertificateSignDocV2": {
+                  "fields": {
+                    "domain": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "intent": {
+                      "type": "AuthorizationIntentV2",
+                      "id": 2
+                    },
+                    "policyId": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "policyVersion": {
+                      "type": "uint64",
+                      "id": 4
+                    },
+                    "policyHash": {
+                      "type": "bytes",
+                      "id": 5
+                    },
+                    "issuerSetId": {
+                      "type": "uint64",
+                      "id": 6
+                    },
+                    "validFromHeight": {
+                      "type": "int64",
+                      "id": 7
+                    },
+                    "validUntilHeight": {
+                      "type": "int64",
+                      "id": 8
+                    }
+                  }
+                },
+                "IssuerSignatureV2": {
+                  "fields": {
+                    "issuerId": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "signature": {
+                      "type": "bytes",
+                      "id": 2
+                    }
+                  }
+                },
+                "AuthorizationCertificateV2": {
+                  "fields": {
+                    "signDoc": {
+                      "type": "AuthorizationCertificateSignDocV2",
+                      "id": 1
+                    },
+                    "signatures": {
+                      "rule": "repeated",
+                      "type": "IssuerSignatureV2",
+                      "id": 2
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

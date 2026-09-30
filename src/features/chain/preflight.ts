@@ -50,7 +50,7 @@ export async function fetchPreflight(address: string): Promise<Preflight> {
   const [status, account, balance] = await Promise.all([
     getJson(`${rpc}/status`),
     getJson(`${rest}/cosmos/auth/v1beta1/accounts/${encodeURIComponent(address)}`),
-    getJson(`${rest}/cosmos/bank/v1beta1/balances/${encodeURIComponent(address)}/by_denom?denom=${encodeURIComponent(config.denom)}`).catch(() => null),
+    getJson(`${rest}/cosmos/bank/v1beta1/balances/${encodeURIComponent(address)}/by_denom?denom=${encodeURIComponent(config.transferDenom)}`).catch(() => null),
   ])
   return mapPreflight(status, account, balance, config.chainId)
 }
