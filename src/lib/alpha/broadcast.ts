@@ -1,4 +1,4 @@
-import { fromBase64, toBase64 } from '@cosmjs/encoding'
+import { fromBase64, toBase64, fromHex } from '@cosmjs/encoding'
 import { config } from '../../app/config'
 import { sha256Hex } from './certificate'
 
@@ -45,7 +45,14 @@ export async function broadcastAndConfirm(raw: Uint8Array, digest: string, rpc: 
   const checkCode = code(check.code)
   if (checkCode !== 0) throw failure(checkCode, check.codespace, check.log)
   for (let attempt = 0; attempt < 20; attempt++) {
-    const answer = object(await rpc('tx', { hash: `0x${hash}`, prove: false }))
+    const hashBytes = fromHex(hash.toLowerCase())
+
+    const answer = object(
+      await rpc('tx', {
+        hash: toBase64(hashBytes),
+        prove: false,
+      }),
+    )
     if (answer.error) {
       const error = object(answer.error)
       const detail = `${typeof error.message === 'string' ? error.message : ''} ${typeof error.data === 'string' ? error.data : ''}`

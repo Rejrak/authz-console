@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { toBase64 } from '@cosmjs/encoding'
+import { fromBase64, toBase64, toHex } from '@cosmjs/encoding'
 import { broadcastAndConfirm } from './broadcast'
 import { sha256Hex } from './certificate'
 
@@ -14,11 +14,20 @@ function included(hash: string, code = 0, eventDigest = digest) {
 it('broadcasts TxRaw once, waits for inclusion, and correlates event digest', async () => {
   const hash = (await sha256Hex(raw)).toUpperCase()
   let queries = 0
-  const rpc = vi.fn(async (method: string) => method === 'broadcast_tx_sync'
-    ? { result: { hash, code: '0' } }
-    : ++queries === 1 ? { error: { message: 'tx not found' } } : included(hash))
+  const rpc = vi.fn(async (method: string, params: Record<string, unknown>) => {
+    if (method === 'broadcast_tx_sync') return { result: { hash, code: '0' } }
+    expect(params).toHaveProperty('hash')
+    return ++queries === 1 ? { error: { message: 'tx not found' } } : included(hash)
+  })
   const wait = vi.fn(async () => {})
   expect(await broadcastAndConfirm(raw, digest, rpc, wait)).toMatchObject({ txHash: hash, height: '22', code: 0, decision: { certificate_digest: digest, outcome: 'ALLOW' } })
+  expect(rpc).toHaveBeenNthCalledWith(1, 'broadcast_tx_sync', { tx: toBase64(raw) })
+  const query = rpc.mock.calls[1][1] as { hash: string; prove: boolean }
+  expect(query.prove).toBe(false)
+  expect(query.hash).not.toMatch(/^0x/i)
+  expect(fromBase64(query.hash)).toHaveLength(32)
+  expect(toHex(fromBase64(query.hash)).toUpperCase()).toBe(hash)
+  expect(rpc).toHaveBeenNthCalledWith(3, 'tx', query)
   expect(rpc.mock.calls.filter(([method]) => method === 'broadcast_tx_sync')).toHaveLength(1)
   expect(wait).toHaveBeenCalledTimes(1)
 })
