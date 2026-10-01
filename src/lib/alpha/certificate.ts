@@ -40,6 +40,7 @@ export interface VerifiedCertificate {
   policyId: string
   policyVersion: string
   issuerSetId: string
+  signatureCount: number
   validFromHeight: string
   validUntilHeight: string
   accountNumber: string
@@ -101,5 +102,5 @@ export async function verifyCertificate(responseValue: unknown, draft: SendDraft
   // Alpha defines certificate_digest over the canonical sign doc, not over the full signed certificate.
   const signBytes = signDocType.encode(object(decoded).signDoc as Record<string, unknown>).finish()
   if (await sha256Hex(signBytes) !== digest) throw new Error('Certificate digest mismatch')
-  return { bytes, digest, certificateBytesHash: await sha256Hex(bytes), protocolVersion: string(response.protocol_version), policyId, policyVersion, issuerSetId, validFromHeight, validUntilHeight, accountNumber, sequence, chainId: config.chainId }
+  return { bytes, digest, certificateBytesHash: await sha256Hex(bytes), protocolVersion: string(response.protocol_version), policyId, policyVersion, issuerSetId, signatureCount: signatures.length, validFromHeight, validUntilHeight, accountNumber, sequence, chainId: config.chainId }
 }

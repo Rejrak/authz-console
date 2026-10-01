@@ -19,6 +19,7 @@ it('verifies canonical sign-doc digest and certificate intent', async () => {
   expect(result.bytes).toEqual(fixture.bytes)
   expect(result.certificateBytesHash).not.toBe(result.digest)
   expect(result.policyId).toBe('policy-bank-send')
+  expect(result.signatureCount).toBe(1)
 })
 
 it('rejects digest, intent, and sequence mismatch', async () => {
